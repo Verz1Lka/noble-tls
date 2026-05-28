@@ -25,6 +25,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Prefetch TLS client library
+        run: |
+          VERSION=$(gh api repos/bogdanfinn/tls-client/releases/latest --jq '.tag_name' | sed 's/^v//')
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            ASSET_ARCH="arm64"
+          else
+            ASSET_ARCH="amd64"
+          fi
+          ASSET_NAME="tls-client-darwin-${ASSET_ARCH}-${VERSION}.dylib"
+          DEP_DIR=$(python -c "from noble_tls.utils.asset import root_dir; print(root_dir() + '/dependencies')")
+          mkdir -p "$DEP_DIR"
+          gh release download "v${VERSION}" --repo bogdanfinn/tls-client --pattern "${ASSET_NAME}" --dir "$DEP_DIR"
+          echo "${ASSET_NAME} ${VERSION}" > "$DEP_DIR/.version"
+          echo ">> Downloaded ${ASSET_NAME} to ${DEP_DIR}"
+          ls -la "$DEP_DIR"
+
       - name: Run tests
         run: |
           pytest noble_tls/tests

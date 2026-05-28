@@ -2,6 +2,7 @@ from enum import Enum
 
 
 class Client(Enum):
+    # --- Chrome ---
     CHROME_103 = "chrome_103"
     CHROME_104 = "chrome_104"
     CHROME_105 = "chrome_105"
@@ -17,10 +18,16 @@ class Client(Enum):
     CHROME_117 = "chrome_117"
     CHROME_120 = "chrome_120"
     CHROME_124 = "chrome_124"
+    CHROME_130_PSK = "chrome_130_PSK"
     CHROME_131 = "chrome_131"
     CHROME_131_PSK = "chrome_131_PSK"
     CHROME_133 = "chrome_133"
     CHROME_133_PSK = "chrome_133_PSK"
+    CHROME_144 = "chrome_144"
+    CHROME_144_PSK = "chrome_144_PSK"
+    CHROME_146 = "chrome_146"
+    CHROME_146_PSK = "chrome_146_PSK"
+    # --- Safari ---
     SAFARI_15_6_1 = "safari_15_6_1"
     SAFARI_16_0 = "safari_16_0"
     SAFARI_IPAD_15_6 = "safari_ipad_15_6"
@@ -29,6 +36,9 @@ class Client(Enum):
     SAFARI_IOS_16_0 = "safari_ios_16_0"
     SAFARI_IOS_17_0 = "safari_ios_17_0"
     SAFARI_IOS_18_0 = "safari_ios_18_0"
+    SAFARI_IOS_18_5 = "safari_ios_18_5"
+    SAFARI_IOS_26_0 = "safari_ios_26_0"
+    # --- Firefox ---
     FIREFOX_102 = "firefox_102"
     FIREFOX_104 = "firefox_104"
     FIREFOX_105 = "firefox_105"
@@ -37,10 +47,18 @@ class Client(Enum):
     FIREFOX_110 = "firefox_110"
     FIREFOX_117 = "firefox_117"
     FIREFOX_120 = "firefox_120"
+    FIREFOX_123 = "firefox_123"
     FIREFOX_132 = "firefox_132"
+    FIREFOX_133 = "firefox_133"
+    FIREFOX_135 = "firefox_135"
+    FIREFOX_146_PSK = "firefox_146_PSK"
+    FIREFOX_147 = "firefox_147"
+    FIREFOX_147_PSK = "firefox_147_PSK"
+    # --- Opera ---
     OPERA_89 = "opera_89"
     OPERA_90 = "opera_90"
     OPERA_91 = "opera_91"
+    # --- Mobile / App ---
     ZALANDO_ANDROID_MOBILE = "zalando_android_mobile"
     ZALANDO_IOS_MOBILE = "zalando_ios_mobile"
     NIKE_IOS_MOBILE = "nike_ios_mobile"

@@ -10,6 +10,7 @@ from .updater.file_fetch import (
 from .utils.asset import generate_asset_name
 from .utils.asset import root_dir
 from .utils.identifiers import Client
+from .response import Protocol
 from .sessions import Session
 
 

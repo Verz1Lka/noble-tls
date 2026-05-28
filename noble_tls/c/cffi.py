@@ -69,16 +69,16 @@ def initialize_library():
         library = ctypes.cdll.LoadLibrary(f"{root_dir()}/dependencies/{asset_name}")
         return library
     except TLSClientException as e:
-        print(f">> Failed to load the TLS Client asset: {e}")
+        raise TLSClientException(f"Failed to load TLS Client asset: {e}")
     except OSError as e:
-        print(f">> Failed to load the library: {e}")
+        msg = f"Failed to load the library: {e}"
         if os.name == "darwin":
-            print(">> If you're on macOS, you need to allow the library to be loaded in System Preferences > Security & Privacy > General.")
+            msg += " — If you're on macOS, allow the library in System Preferences > Security & Privacy > General."
+        raise TLSClientException(msg)
 
-        exit(1)
 
+_library = None
 
-library = initialize_library()
 
 # Define the request function from the shared package
 # https://github.com/bogdanfinn/tls-client/blob/master/cffi_dist/main.go
@@ -105,3 +105,51 @@ destroy_session.restype = ctypes.c_char_p
 
 destroy_all = library.destroyAll # destroy sessions
 destroy_all.restype = ctypes.c_char_p
+def _get_library():
+    global _library
+    if _library is None:
+        _library = initialize_library()
+
+        _library.request.argtypes = [ctypes.c_char_p]
+        _library.request.restype = ctypes.c_char_p
+
+        _library.freeMemory.argtypes = [ctypes.c_char_p]
+        _library.freeMemory.restype = ctypes.c_char_p
+
+        _library.getCookiesFromSession.argtypes = [ctypes.c_char_p]
+        _library.getCookiesFromSession.restype = ctypes.c_char_p
+
+        _library.addCookiesToSession.argtypes = [ctypes.c_char_p]
+        _library.addCookiesToSession.restype = ctypes.c_char_p
+
+        _library.destroySession.argtypes = [ctypes.c_char_p]
+        _library.destroySession.restype = ctypes.c_char_p
+
+        _library.destroyAll.argtypes = []
+        _library.destroyAll.restype = ctypes.c_char_p
+
+    return _library
+
+
+def request(payload: bytes) -> ctypes.c_char_p:
+    return _get_library().request(payload)
+
+
+def free_memory(response_id: bytes) -> ctypes.c_char_p:
+    return _get_library().freeMemory(response_id)
+
+
+def get_cookies_from_session(payload: bytes) -> ctypes.c_char_p:
+    return _get_library().getCookiesFromSession(payload)
+
+
+def add_cookies_to_session(payload: bytes) -> ctypes.c_char_p:
+    return _get_library().addCookiesToSession(payload)
+
+
+def destroy_session(payload: bytes) -> ctypes.c_char_p:
+    return _get_library().destroySession(payload)
+
+
+def destroy_all() -> ctypes.c_char_p:
+    return _get_library().destroyAll()

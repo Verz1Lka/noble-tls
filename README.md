@@ -1,9 +1,9 @@
-# 🔥 Noble TLS
+# Noble TLS
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-310/)
 
 Noble TLS is an advanced HTTP library based on requests and tls-client.
-Now async, providing many more features and auto updating the JA3 fingerprints.
+Fully async, with auto-updating JA3 fingerprints.
 
 # Installation
 ```
@@ -11,119 +11,260 @@ pip install noble-tls
 ```
 
 ### Features
-- [x] Auto updating feature: Update TLS client libs from bogdanfinn/tls-client
+- [x] Auto-update TLS client libs from bogdanfinn/tls-client
 - [x] Async support
-- [x] Proxy support
+- [x] Proxy support (HTTP, HTTPS, SOCKS4, SOCKS5)
 - [x] Custom JA3 string
-- [x] Custom H2 settings
+- [x] Custom H2 and H3 settings
 - [x] Custom supported signature algorithms
 - [x] Custom supported versions
-- [x] Custom key share curves
+- [x] Custom key share curves (including post-quantum)
 - [x] Custom cert compression algorithm
 - [x] Custom pseudo header order
 - [x] Custom connection flow
 - [x] Custom header order
-- [x] Custom client identifier (Chrome, Firefox, Opera, Safari, iOS, iPadOS, Android)
+- [x] 76 preset browser profiles (Chrome, Firefox, Opera, Safari, iOS, iPadOS, Android)
 - [x] Random TLS extension order
-- [x] Custom TLS extension order
-- [x] `requests`'s `history` support
-- [x] `requests`'s `allow_redirects` support
-- [x] much more...
+- [x] HTTP/3 (QUIC) with protocol racing
+- [x] Certificate pinning (HPKP)
+- [x] ECH (Encrypted Client Hello) and ALPS
+- [x] Session lifecycle management (close, get/add cookies from Go layer)
+- [x] Response streaming to file
+- [x] Protocol detection (`response.used_protocol`)
+- [x] Millisecond-precision timeouts
+- [x] IPv4/IPv6 control
+- [x] SNI and Host header overrides
+- [x] Rotating proxy support
+- [x] `requests`-style `history` and `allow_redirects`
 
-# Examples
-The syntax is inspired by [requests](https://github.com/psf/requests), so its very similar and there are only very few things that are different.
+---
 
+## What's new
 
-Example 1 - Preset:
+### Session lifecycle
+
+You can now explicitly destroy sessions and manage cookies at the Go layer:
 
 ```python
+session = noble_tls.Session(client=Client.CHROME_133)
+
+# Do your work...
+res = await session.get("https://example.com")
+
+# Manage cookies in the Go session directly
+cookies = await session.get_cookies("https://example.com")
+await session.add_cookies("https://example.com", [
+    {"name": "sid", "value": "abc", "domain": "example.com", "path": "/"},
+])
+
+# Free Go memory and connections when done
+await session.close()
+
+# Or nuke everything at once
+await Session.close_all()
+```
+
+### Protocol detection
+
+Every response now tells you which protocol was actually negotiated. Using a `Protocol` enum:
+
+```python
+from noble_tls import Protocol
+
+res = await session.get("https://example.com")
+print(res.used_protocol)  # Protocol.HTTP_2
+
+if res.used_protocol == Protocol.HTTP_3:
+    print("Running over QUIC")
+```
+
+### HTTP/3 and protocol racing
+
+HTTP/3 (QUIC) support, with the ability to race HTTP/2 against HTTP/3 the way Chrome does (300ms head start for H2, H3 can still win):
+
+```python
+session = noble_tls.Session(
+    ja3_string="...",
+    protocol_racing=True,
+    h3_settings={"QPACK_MAX_TABLE_CAPACITY": 4096},
+    h3_settings_order=["QPACK_MAX_TABLE_CAPACITY"],
+    h3_pseudo_header_order=[":method", ":authority", ":scheme", ":path"],
+    h3_send_grease_frames=True,
+)
+```
+
+You can also just disable H3 if it causes problems: `disable_http3=True`.
+
+### Network and security options
+
+Per-session network and security settings:
+
+```python
+session = noble_tls.Session(
+    client=Client.CHROME_133_PSK,
+    disable_ipv6=True,                # IPv4 only
+    local_address="0.0.0.0:0",        # Bind to specific interface (host:port)
+    server_name_overwrite="sni.com",   # Override TLS SNI
+    is_rotating_proxy=True,            # Force new connection per request
+    without_cookie_jar=True,           # Disable cookie jar entirely
+    certificate_pinning={              # HPKP - reject if pin doesn't match
+        "example.com": ["sha256_pin_base64"],
+    },
+)
+
+# Per-request: millisecond timeout, host override, stream to file
+res = await session.get(
+    "https://example.com",
+    timeout_milliseconds=2500,
+    request_host_override="other.host.com",
+    stream_output_path="/tmp/response.json",
+    stream_output_block_size=4096,
+)
+```
+
+### ECH, ALPS, and post-quantum curves
+
+Encrypted Client Hello, Application Layer Protocol Settings, and post-quantum key share curves for custom TLS configurations:
+
+```python
+session = noble_tls.Session(
+    ja3_string="...",
+    alps_protocols=["h2"],
+    ech_candidate_payloads=[256],
+    ech_candidate_cipher_suites=[
+        {"kdfId": "HKDF_SHA256", "aeadId": "AEAD_AES_128_GCM"},
+    ],
+    key_share_curves=["GREASE", "X25519MLKEM768", "X25519"],
+    supported_signature_algorithms=[
+        "ECDSAWithP256AndSHA256",
+        "PSSWithSHA256",
+        "Ed25519",
+    ],
+    record_size_limit=16384,
+    allow_http=True,
+    stream_id=1,
+)
+```
+
+### Updated browser profiles
+
+76 profiles now, synced with the latest Go source. New additions:
+
+| Browser | New profiles |
+|---------|-------------|
+| Chrome | 130 PSK, 144, 144 PSK, 146 PSK |
+| Firefox | 123, 133, 146 PSK, 147 PSK |
+| Safari | iOS 18.5, iOS 26.0 |
+
+Removed `CHROME_141` and `CHROME_142`
+
+### Default headers (multi-value)
+
+Separate from the regular `headers` dict, `default_headers` uses a multi-value format and acts as a fallback when no headers are specified on a request:
+
+```python
+session = noble_tls.Session(
+    client=Client.CHROME_133,
+    default_headers={"Accept": ["text/html", "application/json"]},
+)
+```
+
+---
+
+## :shield: Need antibot bypass?
+<a href="https://hypersolutions.co/?utm_source=github&utm_medium=readme&utm_campaign=noble-tls" target="_blank"><img src="https://github.com/rawandahmad698/noble-tls/blob/master/.github/assets/hypersolutions.jpg?raw=true" height="47" width="149"></a>
+
+TLS fingerprinting alone won't get past modern bot protection. **[Hyper Solutions](https://hypersolutions.co?utm_source=github&utm_medium=readme&utm_campaign=noble-tls)** provides API endpoints that generate valid antibot tokens for:
+
+**Akamai** | **DataDome** | **Kasada** | **Incapsula**
+
+No browser automation. Simple API calls that return the cookies and headers these systems expect.
+
+**[Get your API key](https://hypersolutions.co?utm_source=github&utm_medium=readme&utm_campaign=noble-tls)** | **[Docs](https://docs.justhyped.dev)** | **[Discord](https://discord.gg/akamai)**
+
+# Examples
+
+The syntax follows [requests](https://github.com/psf/requests) closely. Most things work the same way.
+
+Example 1 -- Preset browser profile:
+
+<details>
+<summary>Available client identifiers (76 profiles)</summary>
+
+| Chrome | Safari | Firefox | Opera |
+|--------|--------|---------|-------|
+| `CHROME_103` | `SAFARI_15_6_1` | `FIREFOX_102` | `OPERA_89` |
+| `CHROME_104` | `SAFARI_16_0` | `FIREFOX_104` | `OPERA_90` |
+| `CHROME_105` | `SAFARI_IPAD_15_6` | `FIREFOX_105` | `OPERA_91` |
+| `CHROME_106` | `SAFARI_IOS_15_5` | `FIREFOX_106` | |
+| `CHROME_107` | `SAFARI_IOS_15_6` | `FIREFOX_108` | |
+| `CHROME_108` | `SAFARI_IOS_16_0` | `FIREFOX_110` | |
+| `CHROME_109` | `SAFARI_IOS_17_0` | `FIREFOX_117` | |
+| `CHROME_110` | `SAFARI_IOS_18_0` | `FIREFOX_120` | |
+| `CHROME_111` | `SAFARI_IOS_18_5` | `FIREFOX_123` | |
+| `CHROME_112` | `SAFARI_IOS_26_0` | `FIREFOX_132` | |
+| `CHROME_116_PSK` | | `FIREFOX_133` | |
+| `CHROME_116_PSK_PQ` | | `FIREFOX_135` | |
+| `CHROME_117` | | `FIREFOX_146_PSK` | |
+| `CHROME_120` | | `FIREFOX_147` | |
+| `CHROME_124` | | `FIREFOX_147_PSK` | |
+| `CHROME_130_PSK` | | | |
+| `CHROME_131` | | | |
+| `CHROME_131_PSK` | | | |
+| `CHROME_133` | | | |
+| `CHROME_133_PSK` | | | |
+| `CHROME_144` | | | |
+| `CHROME_144_PSK` | | | |
+| `CHROME_146` | | | |
+| `CHROME_146_PSK` | | | |
+
+| Mobile / App |
+|-------------|
+| `ZALANDO_ANDROID_MOBILE`, `ZALANDO_IOS_MOBILE` |
+| `NIKE_IOS_MOBILE`, `NIKE_ANDROID_MOBILE` |
+| `CLOUDSCRAPER` |
+| `MMS_IOS`, `MMS_IOS_1`, `MMS_IOS_2`, `MMS_IOS_3` |
+| `MESH_IOS`, `MESH_IOS_1`, `MESH_IOS_2` |
+| `MESH_ANDROID`, `MESH_ANDROID_1`, `MESH_ANDROID_2` |
+| `CONFIRMED_IOS`, `CONFIRMED_ANDROID` |
+| `OKHTTP4_ANDROID_7` through `OKHTTP4_ANDROID_13` |
+
+</details>
+
+```python
+import asyncio
 import noble_tls
 from noble_tls import Client
 
-# Available identifiers: 
-""" 
-    CHROME_103 = "chrome_103"
-    CHROME_104 = "chrome_104"
-    CHROME_105 = "chrome_105"
-    CHROME_106 = "chrome_106"
-    CHROME_107 = "chrome_107"
-    CHROME_108 = "chrome_108"
-    CHROME_109 = "chrome_109"
-    CHROME_110 = "chrome_110"
-    CHROME_111 = "chrome_111"
-    CHROME_112 = "chrome_112"
-    CHROME_116_PSK = "chrome_116_PSK"
-    CHROME_116_PSK_PQ = "chrome_116_PSK_PQ"
-    CHROME_117 = "chrome_117"
-    CHROME_120 = "chrome_120"
-    SAFARI_15_6_1 = "safari_15_6_1"
-    SAFARI_16_0 = "safari_16_0"
-    SAFARI_IPAD_15_6 = "safari_ipad_15_6"
-    SAFARI_IOS_15_5 = "safari_ios_15_5"
-    SAFARI_IOS_15_6 = "safari_ios_15_6"
-    SAFARI_IOS_16_0 = "safari_ios_16_0"
-    FIREFOX_102 = "firefox_102"
-    FIREFOX_104 = "firefox_104"
-    FIREFOX_105 = "firefox_105"
-    FIREFOX_106 = "firefox_106"
-    FIREFOX_108 = "firefox_108"
-    FIREFOX_110 = "firefox_110"
-    FIREFOX_117 = "firefox_117"
-    FIREFOX_120 = "firefox_120"
-    OPERA_89 = "opera_89"
-    OPERA_90 = "opera_90"
-    OPERA_91 = "opera_91"
-    ZALANDO_ANDROID_MOBILE = "zalando_android_mobile"
-    ZALANDO_IOS_MOBILE = "zalando_ios_mobile"
-    NIKE_IOS_MOBILE = "nike_ios_mobile"
-    NIKE_ANDROID_MOBILE = "nike_android_mobile"
-    CLOUDSCRAPER = "cloudscraper"
-    MMS_IOS = "mms_ios"
-    MMS_IOS_1 = "mms_ios_1"
-    MMS_IOS_2 = "mms_ios_2"
-    MMS_IOS_3 = "mms_ios_3"
-    MESH_IOS = "mesh_ios"
-    MESH_IOS_1 = "mesh_ios_1"
-    MESH_IOS_2 = "mesh_ios_2"
-    MESH_ANDROID = "mesh_android"
-    MESH_ANDROID_1 = "mesh_android_1"
-    MESH_ANDROID_2 = "mesh_android_2"
-    CONFIRMED_IOS = "confirmed_ios"
-    CONFIRMED_ANDROID = "confirmed_android"
-    OKHTTP4_ANDROID_7 = "okhttp4_android_7"
-    OKHTTP4_ANDROID_8 = "okhttp4_android_8"
-    OKHTTP4_ANDROID_9 = "okhttp4_android_9"
-    OKHTTP4_ANDROID_10 = "okhttp4_android_10"
-    OKHTTP4_ANDROID_11 = "okhttp4_android_11"
-    OKHTTP4_ANDROID_12 = "okhttp4_android_12"
-    OKHTTP4_ANDROID_13 = "okhttp4_android_13"
-"""
-
 async def main():
-    await noble_tls.update_if_necessary() # Update TLS client libs from bogdanfinn/tls-client
+    await noble_tls.update_if_necessary()
     session = noble_tls.Session(
-        client=Client.CHROME_111,
+        client=Client.CHROME_133,
         random_tls_extension_order=True
     )
     res = await session.get(
         "https://www.example.com/",
-        headers={
-            "key1": "value1",
-        },
+        headers={"key1": "value1"},
         proxy="http://user:password@host:port"
     )
+    print(res.status_code)
+    print(res.used_protocol)
     print(res.text)
+
+    await session.close()
+
+asyncio.run(main())
 ```
 
-Example 2 - Custom:
+Example 2 -- Custom JA3 fingerprint:
 
 ```python
+import asyncio
 import noble_tls
 
-
 async def main():
-    await noble_tls.update_if_necessary() # Update TLS client libs from bogdanfinn/tls-client
-    
+    await noble_tls.update_if_necessary()
+
     session = noble_tls.Session(
         ja3_string="771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0",
         h2_settings={
@@ -151,33 +292,27 @@ async def main():
         supported_versions=["GREASE", "1.3", "1.2"],
         key_share_curves=["GREASE", "X25519"],
         cert_compression_algo="brotli",
-        pseudo_header_order=[
-            ":method",
-            ":authority",
-            ":scheme",
-            ":path"
-        ],
+        pseudo_header_order=[":method", ":authority", ":scheme", ":path"],
         connection_flow=15663105,
-        header_order=[
-            "accept",
-            "user-agent",
-            "accept-encoding",
-            "accept-language"
-        ]
+        header_order=["accept", "user-agent", "accept-encoding", "accept-language"]
     )
 
     res = await session.post(
         "https://www.example.com/",
-        headers={
-            "key1": "value1",
-        },
+        headers={"key1": "value1"},
         proxy="http://user:password@host:port"
     )
     print(res.text)
+
+    await session.close()
+
+asyncio.run(main())
 ```
 
+More examples in the [`examples/`](examples/) folder.
+
 # Pyinstaller / Pyarmor
-**If you want to pack the library with Pyinstaller or Pyarmor, make sure to add this to your command:**
+**If you want to pack the library with Pyinstaller or Pyarmor, add this to your command:**
 
 Linux - Ubuntu / x86:
 ```
@@ -203,8 +338,10 @@ Windows:
 ```
 --add-binary '{path_to_library}/tls_client/dependencies/tls-client-64.dll;tls_client/dependencies'
 ```
-### ❤️ One final note
-Package is named after [Admiral Atticus Noble in Rebel Moon: Part One - A Child of Fire villain](https://www.youtube.com/watch?v=cO-GPaASWV0)
+
+### One final note
+Package is named after [Admiral Atticus Noble in Rebel Moon: Part One - A Child of Fire](https://www.youtube.com/watch?v=cO-GPaASWV0)
+
 ### Acknowledgements
-Big shout out to [Bogdanfinn](https://github.com/bogdanfinn) for open sourcing his [tls-client](https://github.com/bogdanfinn/tls-client) in Golang.
-and FlorianREGAZ
+Big shout out to [Bogdanfinn](https://github.com/bogdanfinn) for open sourcing his [tls-client](https://github.com/bogdanfinn/tls-client) in Go,
+and [FlorianREGAZ](https://github.com/FlorianREGAZ) for the original Python wrapper.

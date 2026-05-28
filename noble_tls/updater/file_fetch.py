@@ -12,7 +12,20 @@ owner = 'bogdanfinn'
 repo = 'tls-client'
 url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
 root_directory = root_dir()
-GITHUB_TOKEN = os.getenv("GH_TOKEN")
+GITHUB_TOKEN = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+_deps_dir = os.path.join(root_directory, 'dependencies')
+_version_file = os.path.join(_deps_dir, '.version')
+
+
+def _asset_path(asset_name: str) -> str:
+    return os.path.join(_deps_dir, asset_name)
+
+
+def _github_headers(accept: str = 'application/vnd.github.v3+json') -> dict:
+    headers = {'Accept': accept, 'User-Agent': 'noble-tls'}
+    if GITHUB_TOKEN:
+        headers['Authorization'] = f'token {GITHUB_TOKEN}'
+    return headers
 
 
 def auto_retry(retries: int):
@@ -42,24 +55,16 @@ async def get_latest_release() -> Tuple[str, list]:
 
     :return: Latest release tag name, and a list of assets
     """
-    # Make a GET request to the GitHub API
     async with httpx.AsyncClient() as client:
-        headers = {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'noble-tls'
-        }
-        response = await client.get(url, headers=headers)
+        response = await client.get(url, headers=_github_headers())
 
-    # Check if the request was successful
     if response.status_code == 200:
-        data = response.json()  # Parse the JSON data from the response
-        version_num = data['tag_name'].replace('v', '')  # Return the tag name without the 'v' prefix
+        data = response.json()
+        version_num = data['tag_name'].replace('v', '')
         if 'assets' not in data:
             raise TLSClientException(f"Version {version_num} does not have any assets.")
 
-        # Get assets
-        assets = data['assets']
-        return version_num, assets
+        return version_num, data['assets']
     else:
         raise TLSClientException(f"Failed to fetch the latest release. Status code: {response.status_code}")
 
@@ -69,56 +74,43 @@ async def download_and_save_asset(
         asset_name: str,
         version: str
 ) -> None:
-    # Download
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        headers = {
-            'Accept': 'application/octet-stream',
-            'User-Agent': 'rawandahmad698',
-            'Connection': 'keep-alive'
-        }
-        if GITHUB_TOKEN:
-            headers["Authorization"] = f"token {GITHUB_TOKEN}"
-            print(">> Using GitHub token for authentication.")
+    headers = _github_headers(accept='application/octet-stream')
+    headers['Connection'] = 'keep-alive'
+    if GITHUB_TOKEN:
+        print(">> Using GitHub token for authentication.")
 
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         response = await client.get(asset_url, headers=headers)
         if response.status_code != 200:
             raise TLSClientException(f"Failed to download asset {asset_name}. Status code: {response.status_code}")
 
-        with open(f'{root_directory}/dependencies/{asset_name}', 'wb') as f:
+        os.makedirs(_deps_dir, exist_ok=True)
+        with open(_asset_path(asset_name), 'wb') as f:
             f.write(response.content)
 
-        # Save version info
         await save_version_info(asset_name, version)
 
 
 async def save_version_info(asset_name: str, version: str):
-    """
-    Save version info to a hidden .version file in root_dir/dependencies
-    """
-    with open(f'{root_directory}/dependencies/.version', 'w') as f:
+    """Save version info to a hidden .version file in dependencies/."""
+    with open(_version_file, 'w') as f:
         f.write(f"{asset_name} {version}")
 
 
 def delete_version_info():
-    """
-    Delete everything inside dependencies/.version
-    """
+    """Delete everything inside dependencies/."""
     try:
-        # Delete all files in dependencies
-        for file in os.listdir(f'{root_directory}/dependencies'):
-            os.remove(f'{root_directory}/dependencies/{file}')
+        for file in os.listdir(_deps_dir):
+            os.remove(os.path.join(_deps_dir, file))
     except FileNotFoundError:
         pass
 
 
 def read_version_info():
-    """
-    Read version info from a hidden .version file in root_dir/dependencies
-    """
+    """Read version info from .version file in dependencies/."""
     try:
-        with open(f'{root_directory}/dependencies/.version', 'r') as f:
-            data = f.read()
-            data = data.split(' ')
+        with open(_version_file, 'r') as f:
+            data = f.read().split(' ')
             return data[0], data[1]
     except FileNotFoundError:
         return None, None
@@ -130,16 +122,14 @@ async def download_if_necessary():
         raise TLSClientException(f"Version {version_num} does not have any assets.")
 
     asset_name = generate_asset_name(custom_part=repo, version=version_num)
-    # Check if asset name is in the list of assets in root dir/dependencies
-    if os.path.exists(f'{root_directory}/dependencies/{asset_name}'):
+    if os.path.exists(_asset_path(asset_name)):
         return
 
     download_url = [asset['browser_download_url'] for asset in asset_url if asset['name'] == asset_name]
     if len(download_url) == 0:
         raise TLSClientException(f"Unable to find asset {asset_name} for version {version_num}.")
 
-    download_url = download_url[0]
-    await download_and_save_asset(download_url, asset_name, version_num)
+    await download_and_save_asset(download_url[0], asset_name, version_num)
 
 
 async def update_if_necessary():
